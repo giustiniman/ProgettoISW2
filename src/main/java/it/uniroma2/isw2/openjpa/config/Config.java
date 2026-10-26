@@ -5,12 +5,14 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 
 public record Config(Path repository, String repositoryUrl, String jiraBaseUrl, String jiraProject,
                      List<String> tagPatterns, String dateFallbackRef, double releaseFraction,
-                     Path outputCsv, Path workDirectory) {
+                     Set<String> excludedCommits, Path outputCsv, Path workDirectory) {
 
     public static Config load() throws IOException {
         Path configPath = Path.of(System.getProperty("config.file", "config.properties"))
@@ -28,6 +30,8 @@ public record Config(Path repository, String repositoryUrl, String jiraBaseUrl, 
                 .map(String::trim)
                 .filter(value -> !value.isEmpty())
                 .toList();
+        Set<String> excludedCommits = parseCommitHashes(
+                properties.getProperty("git.excluded.commits", ""));
 
         double fraction = Double.parseDouble(required(properties, "release.fraction"));
         if (!(fraction > 0.0 && fraction <= 1.0)) {
@@ -41,9 +45,26 @@ public record Config(Path repository, String repositoryUrl, String jiraBaseUrl, 
                 patterns,
                 required(properties, "git.date.fallback.ref"),
                 fraction,
+                excludedCommits,
                 output,
                 work
         );
+    }
+
+    private static Set<String> parseCommitHashes(String value) {
+        Set<String> hashes = new LinkedHashSet<>();
+        for (String candidate : value.split(",")) {
+            String hash = candidate.trim().toLowerCase(java.util.Locale.ROOT);
+            if (hash.isEmpty()) {
+                continue;
+            }
+            if (!hash.matches("[0-9a-f]{40}")) {
+                throw new IllegalArgumentException(
+                        "git.excluded.commits contiene un hash Git non valido: " + candidate.trim());
+            }
+            hashes.add(hash);
+        }
+        return Set.copyOf(hashes);
     }
 
     private static Path resolve(Path base, String value) {
