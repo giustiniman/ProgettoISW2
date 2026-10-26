@@ -94,6 +94,7 @@ final class BasicSzz {
                 value.startsWith("a/") || value.startsWith("b/") ? value.substring(2) : value);
     }
 
+
     private record LineRange(int start, int end) {
     }
 }
