@@ -10,14 +10,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
 public final class GitClient {
+
+    static final String GIT_EXECUTABLE = "/usr/bin/git";
+    private static final String REV_LIST = "rev-list";
+    private static final Logger LOGGER = Logger.getLogger(GitClient.class.getName());
 
     private final Path repository;
     private final GitHistory history;
@@ -45,7 +49,7 @@ public final class GitClient {
             cloneRepository(repositoryUrl);
         }
         try {
-            run("git", "rev-parse", "--is-inside-work-tree");
+            run(GIT_EXECUTABLE, "rev-parse", "--is-inside-work-tree");
         } catch (IOException e) {
             throw new IOException("Il percorso non contiene un repository Git valido: "
                     + repository, e);
@@ -58,11 +62,11 @@ public final class GitClient {
             throw new IOException("Percorso repository senza cartella padre: " + repository);
         }
         Files.createDirectories(parent);
-        System.out.printf("Repository OpenJPA assente. Clone da %s in %s...%n",
-                repositoryUrl, repository);
+        LOGGER.info(() -> "Repository OpenJPA assente. Clone da " + repositoryUrl
+                + " in " + repository + "...");
 
         ProcessBuilder builder = new ProcessBuilder(
-                "git", "clone", "--no-checkout", repositoryUrl, repository.toString());
+                GIT_EXECUTABLE, "clone", "--no-checkout", repositoryUrl, repository.toString());
         builder.directory(parent.toFile());
         execute(builder, "Clone Git fallito: " + repositoryUrl);
         if (!Files.isDirectory(repository)) {
@@ -73,7 +77,7 @@ public final class GitClient {
     public String resolveTag(String tag) {
         try {
             List<String> lines = run(
-                    "git", "rev-parse", "--verify", "refs/tags/" + tag + "^{commit}");
+                    GIT_EXECUTABLE, "rev-parse", "--verify", "refs/tags/" + tag + "^{commit}");
             return lines.isEmpty() ? null : lines.get(0).trim();
         } catch (IOException e) {
             return null;
@@ -86,7 +90,7 @@ public final class GitClient {
     public String resolveLastCommitBefore(String ref, LocalDate releaseDate) {
         String cutoff = releaseDate.plusDays(1) + "T00:00:00Z";
         try {
-            List<String> lines = run("git", "rev-list", "-1", "--before=" + cutoff, ref);
+            List<String> lines = run(GIT_EXECUTABLE, REV_LIST, "-1", "--before=" + cutoff, ref);
             return lines.isEmpty() ? null : lines.get(0).trim();
         } catch (IOException e) {
             return null;
@@ -98,7 +102,7 @@ public final class GitClient {
 
     public List<String> listProductionClasses(String commitHash)
             throws IOException, InterruptedException {
-        return run("git", "ls-tree", "-r", "--name-only", commitHash).stream()
+        return run(GIT_EXECUTABLE, "ls-tree", "-r", "--name-only", commitHash).stream()
                 .map(GitClient::normalizePath)
                 .filter(GitClient::isProductionJava)
                 .sorted()
@@ -122,7 +126,7 @@ public final class GitClient {
 
     public String mergeBase(String leftCommit, String rightCommit)
             throws IOException, InterruptedException {
-        List<String> lines = run("git", "merge-base", leftCommit, rightCommit);
+        List<String> lines = run(GIT_EXECUTABLE, "merge-base", leftCommit, rightCommit);
         if (lines.isEmpty()) {
             throw new IOException("Merge base non trovato tra " + leftCommit + " e " + rightCommit);
         }
@@ -131,7 +135,7 @@ public final class GitClient {
 
     public int countCommits(String boundaryExclusive, String currentCommit)
             throws IOException, InterruptedException {
-        List<String> lines = run("git", "rev-list", "--count", "--no-merges",
+        List<String> lines = run(GIT_EXECUTABLE, REV_LIST, "--count", "--no-merges",
                 boundaryExclusive + ".." + currentCommit);
         return Integer.parseInt(lines.get(0).trim());
     }
@@ -153,17 +157,17 @@ public final class GitClient {
     public Path addWorktree(Path worktree, String commitHash)
             throws IOException, InterruptedException {
         Files.createDirectories(worktree.toAbsolutePath().getParent());
-        run("git", "worktree", "add", "--detach", "--force",
+        run(GIT_EXECUTABLE, "worktree", "add", "--detach", "--force",
                 worktree.toAbsolutePath().toString(), commitHash);
         return worktree.toAbsolutePath();
     }
 
     public void removeWorktree(Path worktree) throws IOException, InterruptedException {
-        run("git", "worktree", "remove", "--force", worktree.toAbsolutePath().toString());
+        run(GIT_EXECUTABLE, "worktree", "remove", "--force", worktree.toAbsolutePath().toString());
     }
 
     String firstParent(String commitHash) throws IOException, InterruptedException {
-        List<String> lines = run("git", "rev-list", "--parents", "-n", "1", commitHash);
+        List<String> lines = run(GIT_EXECUTABLE, REV_LIST, "--parents", "-n", "1", commitHash);
         if (lines.isEmpty()) {
             return null;
         }

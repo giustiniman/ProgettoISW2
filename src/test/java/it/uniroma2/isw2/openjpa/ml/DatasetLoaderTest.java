@@ -53,15 +53,17 @@ class DatasetLoaderTest {
 
     private Path writeDataset() throws Exception {
         Path path = tempDirectory.resolve("dataset.csv");
-        Files.writeString(path, "Project,Release,Class,LOC,Metric,NSmells,Buggy\n"
-                + "OPENJPA,1.0.0,A,10,1,0,No\n"
-                + "OPENJPA,1.0.0,B,20,2,0,No\n"
-                + "OPENJPA,1.0.0,C,30,3,1,No\n"
-                + "OPENJPA,1.0.0,D,40,9,2,Yes\n"
-                + "OPENJPA,1.0.1,E,15,2,0,No\n"
-                + "OPENJPA,1.0.1,F,25,8,1,Yes\n"
-                + "OPENJPA,1.0.2,G,35,7,2,Yes\n"
-                + "OPENJPA,1.0.2,H,45,1,0,No\n");
+        Files.writeString(path, """
+                Project,Release,Class,LOC,Metric,NSmells,Buggy
+                OPENJPA,1.0.0,A,10,1,0,No
+                OPENJPA,1.0.0,B,20,2,0,No
+                OPENJPA,1.0.0,C,30,3,1,No
+                OPENJPA,1.0.0,D,40,9,2,Yes
+                OPENJPA,1.0.1,E,15,2,0,No
+                OPENJPA,1.0.1,F,25,8,1,Yes
+                OPENJPA,1.0.2,G,35,7,2,Yes
+                OPENJPA,1.0.2,H,45,1,0,No
+                """);
         return path;
     }
 }

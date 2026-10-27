@@ -45,23 +45,22 @@ public final class CkMetricsCalculator {
             List<CKClassResult> candidates = resultsByFile.getOrDefault(classPath, List.of());
             CKClassResult selected = selectTopLevelClass(classPath, candidates);
             if (selected == null) {
-                if (candidates.isEmpty() && isAnnotationType(root.resolve(classPath))) {
-                    continue;
+                if (!candidates.isEmpty() || !isAnnotationType(root.resolve(classPath))) {
+                    missing.add(classPath);
                 }
-                missing.add(classPath);
-                continue;
+            } else {
+                double lcom = selected.getLcomNormalized();
+                if (!Double.isFinite(lcom)) {
+                    lcom = 0.0;
+                }
+                metrics.put(classPath, new StaticMetrics(selected.getLoc(), selected.getWmc(),
+                        selected.getCbo(), selected.getRfc(), Math.max(0.0, Math.min(1.0, lcom))));
             }
-            double lcom = selected.getLcomNormalized();
-            if (!Double.isFinite(lcom)) {
-                lcom = 0.0;
-            }
-            metrics.put(classPath, new StaticMetrics(selected.getLoc(), selected.getWmc(),
-                    selected.getCbo(), selected.getRfc(), Math.max(0.0, Math.min(1.0, lcom))));
         }
 
         if (!missing.isEmpty() || !errors.isEmpty()) {
-            String detail = !errors.isEmpty() ? errors.get(0)
-                    : "nessun risultato CK per " + missing.get(0);
+            String detail = errors.isEmpty() ? "nessun risultato CK per " + missing.get(0)
+                    : errors.get(0);
             throw new IOException("CK non ha analizzato tutte le classi: " + missing.size()
                     + " mancanti, " + errors.size() + " errori. Primo problema: " + detail);
         }

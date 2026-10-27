@@ -11,9 +11,13 @@ import weka.core.Utils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
+import java.util.logging.Logger;
 
 final class ModelEvaluator {
+
+    private static final Logger LOGGER = Logger.getLogger(ModelEvaluator.class.getName());
 
     private final DataPreprocessor preprocessor;
     private final int baseSeed;
@@ -31,8 +35,8 @@ final class ModelEvaluator {
         List<ReleaseFold> folds = dataset.walkForwardFolds();
 
         for (Experiment experiment : experiments) {
-            System.out.printf("  walk-forward: %s / %s%n",
-                    experiment.classifier().label(), experiment.pipeline().label());
+            LOGGER.info(() -> String.format(Locale.ROOT, "  walk-forward: %s / %s",
+                    experiment.classifier().label(), experiment.pipeline().label()));
             List<ScoredPrediction> allPredictions = new ArrayList<>();
             for (ReleaseFold fold : folds) {
                 int seed = baseSeed + fold.index();
@@ -56,12 +60,12 @@ final class ModelEvaluator {
         }
         List<SummaryResult> summaries = new ArrayList<>();
         for (Experiment experiment : experiments) {
-            System.out.printf("  cross-validation: %s / %s%n",
-                    experiment.classifier().label(), experiment.pipeline().label());
+            LOGGER.info(() -> String.format(Locale.ROOT, "  cross-validation: %s / %s",
+                    experiment.classifier().label(), experiment.pipeline().label()));
             List<PerformanceMetrics> repetitions = new ArrayList<>();
             for (int repeat = 0; repeat < repeats; repeat++) {
                 Instances randomized = new Instances(dataset.all());
-                Random random = new Random(baseSeed + repeat);
+                Random random = new Random((long) baseSeed + repeat);
                 randomized.randomize(random);
                 randomized.stratify(folds);
                 List<ScoredPrediction> predictions = new ArrayList<>();

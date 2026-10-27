@@ -24,6 +24,8 @@ final class GitHistory {
     private static final String COMMIT_MARKER = "__OPENJPA_COMMIT__";
     private static final String END_MARKER = "__OPENJPA_END__";
     private static final String HISTORY_MARKER = "__OPENJPA_HISTORY__";
+    private static final String FORMAT_OPTION = "--format=";
+    private static final String NO_MERGES = "--no-merges";
     private static final int METADATA_BATCH_SIZE = 256;
 
     private final GitClient git;
@@ -41,19 +43,27 @@ final class GitHistory {
 
     List<FixCommit> findFixCommits(Collection<String> knownTickets)
             throws IOException, InterruptedException {
-        Set<String> known = new HashSet<>();
-        for (String ticket : knownTickets) {
-            known.add(ticket.toUpperCase(Locale.ROOT));
-        }
-
-        List<String> lines = git.run("git", "log", "--all",
-                "--format=" + COMMIT_MARKER + "%H%x09%ct%n%B%n" + END_MARKER);
+        Set<String> known = knownTickets.stream()
+                .map(ticket -> ticket.toUpperCase(Locale.ROOT))
+                .collect(java.util.stream.Collectors.toSet());
+        List<String> lines = git.run(GitClient.GIT_EXECUTABLE, "log", "--all",
+                FORMAT_OPTION + COMMIT_MARKER + "%H%x09%ct%n%B%n" + END_MARKER);
         List<FixCommit> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
+        for (LoggedCommit commit : parseFixLog(lines)) {
+            registerAdministrativeCommit(commit.hash(), commit.message());
+            if (!isExcluded(commit.hash())) {
+                addMatchingFixes(commit, known, seen, result);
+            }
+        }
+        return result;
+    }
+
+    private static List<LoggedCommit> parseFixLog(List<String> lines) {
+        List<LoggedCommit> commits = new ArrayList<>();
         String hash = null;
         Instant time = null;
         StringBuilder message = new StringBuilder();
-
         for (String line : lines) {
             if (line.startsWith(COMMIT_MARKER)) {
                 String[] fields = line.substring(COMMIT_MARKER.length()).split("\\t", 2);
@@ -62,59 +72,74 @@ final class GitHistory {
                 message.setLength(0);
             } else if (line.equals(END_MARKER)) {
                 if (hash != null) {
-                    registerAdministrativeCommit(hash, message.toString());
-                    Matcher matcher = TICKET_KEY.matcher(message);
-                    while (!isExcluded(hash) && matcher.find()) {
-                        String ticket = matcher.group().toUpperCase(Locale.ROOT);
-                        if (known.contains(ticket) && seen.add(ticket + "#" + hash)) {
-                            result.add(new FixCommit(ticket, hash, time));
-                        }
-                    }
+                    commits.add(new LoggedCommit(hash, time, message.toString()));
                 }
                 hash = null;
             } else if (hash != null) {
                 message.append(line).append('\n');
             }
         }
-        return result;
+        return commits;
+    }
+
+    private static void addMatchingFixes(LoggedCommit commit, Set<String> known,
+                                         Set<String> seen, List<FixCommit> result) {
+        Matcher matcher = TICKET_KEY.matcher(commit.message());
+        while (matcher.find()) {
+            String ticket = matcher.group().toUpperCase(Locale.ROOT);
+            if (known.contains(ticket) && seen.add(ticket + "#" + commit.hash())) {
+                result.add(new FixCommit(ticket, commit.hash(), commit.time()));
+            }
+        }
     }
 
     List<Touch> fileHistory(String releaseCommit, String classPath)
             throws IOException, InterruptedException {
-        List<String> lines = git.run("git", "log", "--follow", "--no-merges",
+        List<String> lines = git.run(GitClient.GIT_EXECUTABLE, "log", "--follow", NO_MERGES,
                 "--ignore-space-at-eol", "--ignore-blank-lines", "--numstat",
-                "--format=" + HISTORY_MARKER + "%H%x09%ct%x09%aE",
+                FORMAT_OPTION + HISTORY_MARKER + "%H%x09%ct%x09%aE",
                 releaseCommit, "--", classPath);
         List<Touch> touches = new ArrayList<>();
-        String hash = null;
-        Instant time = null;
-        String author = "";
+        HistoryPoint current = null;
 
         for (String line : lines) {
             if (line.startsWith(HISTORY_MARKER)) {
-                String[] fields = line.substring(HISTORY_MARKER.length()).split("\\t", 3);
-                hash = fields[0];
-                time = Instant.ofEpochSecond(Long.parseLong(fields[1]));
-                author = fields.length > 2 ? fields[2].trim().toLowerCase(Locale.ROOT) : "";
-            } else if (hash != null && !line.isBlank()) {
-                String[] fields = line.split("\\t", 3);
-                if (fields.length == 3) {
-                    int added = parseNumstat(fields[0]);
-                    int deleted = parseNumstat(fields[1]);
-                    if (added + deleted > 0 && !isExcluded(hash)) {
-                        touches.add(new Touch(hash, time, author, added, deleted));
-                    }
-                    hash = null;
+                current = parseHistoryPoint(line);
+            } else if (current != null && !line.isBlank()) {
+                Touch touch = parseTouch(line, current);
+                if (touch != null) {
+                    touches.add(touch);
                 }
+                current = null;
             }
         }
         return touches;
     }
 
+    private static HistoryPoint parseHistoryPoint(String line) {
+        String[] fields = line.substring(HISTORY_MARKER.length()).split("\\t", 3);
+        String author = fields.length > 2 ? fields[2].trim().toLowerCase(Locale.ROOT) : "";
+        return new HistoryPoint(fields[0],
+                Instant.ofEpochSecond(Long.parseLong(fields[1])), author);
+    }
+
+    private Touch parseTouch(String line, HistoryPoint current) {
+        String[] fields = line.split("\\t", 3);
+        if (fields.length != 3) {
+            return null;
+        }
+        int added = parseNumstat(fields[0]);
+        int deleted = parseNumstat(fields[1]);
+        if (added + deleted == 0 || isExcluded(current.hash())) {
+            return null;
+        }
+        return new Touch(current.hash(), current.time(), current.author(), added, deleted);
+    }
+
     Set<String> commitsInRange(String currentCommit, String boundaryExclusive)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>(List.of(
-                "git", "rev-list", "--no-merges", currentCommit));
+                GitClient.GIT_EXECUTABLE, "rev-list", NO_MERGES, currentCommit));
         if (boundaryExclusive != null) {
             command.add("^" + boundaryExclusive);
         }
@@ -138,9 +163,9 @@ final class GitHistory {
 
     Map<String, CommitStats> commitStats(Collection<String> releaseCommits)
             throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>(List.of("git", "log", "--no-merges",
+        List<String> command = new ArrayList<>(List.of(GitClient.GIT_EXECUTABLE, "log", NO_MERGES,
                 "--ignore-space-at-eol", "--ignore-blank-lines",
-                "--format=" + COMMIT_MARKER + "%H", "--numstat"));
+                FORMAT_OPTION + COMMIT_MARKER + "%H", "--numstat"));
         command.addAll(releaseCommits);
 
         Map<String, CommitStats> result = new HashMap<>();
@@ -201,8 +226,8 @@ final class GitHistory {
         for (int start = 0; start < unknown.size(); start += METADATA_BATCH_SIZE) {
             int end = Math.min(start + METADATA_BATCH_SIZE, unknown.size());
             List<String> batch = unknown.subList(start, end);
-            List<String> command = new ArrayList<>(List.of("git", "show", "-s",
-                    "--format=" + COMMIT_MARKER + "%H%n%B%n" + END_MARKER));
+            List<String> command = new ArrayList<>(List.of(GitClient.GIT_EXECUTABLE, "show", "-s",
+                    FORMAT_OPTION + COMMIT_MARKER + "%H%n%B%n" + END_MARKER));
             command.addAll(batch);
             inspectMessages(git.run(command.toArray(String[]::new)));
             inspected.addAll(batch);
@@ -237,7 +262,17 @@ final class GitHistory {
         return message.lines()
                 .map(String::trim)
                 .filter(line -> line.startsWith("git-svn-id:"))
-                .anyMatch(line -> line.matches("git-svn-id:\\s+\\S*/tags(?:/|@)\\S*\\s+.*"));
+                .anyMatch(GitHistory::isSvnTagLine);
+    }
+
+    private static boolean isSvnTagLine(String line) {
+        String metadata = line.substring("git-svn-id:".length()).trim();
+        int separator = metadata.indexOf(' ');
+        if (separator < 0) {
+            return false;
+        }
+        String source = metadata.substring(0, separator);
+        return source.contains("/tags/") || source.contains("/tags@");
     }
 
     private static int parseNumstat(String value) {
@@ -246,5 +281,11 @@ final class GitHistory {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    private record LoggedCommit(String hash, Instant time, String message) {
+    }
+
+    private record HistoryPoint(String hash, Instant time, String author) {
     }
 }

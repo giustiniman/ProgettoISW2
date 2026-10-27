@@ -19,8 +19,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class LabelingService {
+
+    private static final Logger LOGGER = Logger.getLogger(LabelingService.class.getName());
 
     public LabelingResult label(List<Release> allReleases,
                                 List<Release> selectedReleases,
@@ -28,66 +32,107 @@ public final class LabelingService {
                                 Map<Integer, List<String>> inventory,
                                 GitClient git) throws IOException, InterruptedException {
         List<TicketWindow> windows = resolveWindows(tickets, allReleases);
-        Map<String, TicketWindow> windowByTicket = new HashMap<>();
+        Map<String, TicketWindow> windowByTicket = indexWindows(windows);
+        Map<String, Ticket> ticketByKey = indexTickets(tickets);
+        FixLinks fixLinks = linkFixCommits(git, ticketByKey);
+        Map<String, Boolean> labels = initializeLabels(selectedReleases, inventory);
+        applyBuggyLabels(labels, fixLinks.classesByTicket(), windowByTicket,
+                selectedReleases);
+
+        return new LabelingResult(labels, fixLinks.resolutionByCommit(), windows,
+                fixLinks.linkedCommitCount(), fixLinks.szzClassCount());
+    }
+
+    private static Map<String, TicketWindow> indexWindows(List<TicketWindow> windows) {
+        Map<String, TicketWindow> result = new HashMap<>();
         for (TicketWindow window : windows) {
-            windowByTicket.put(window.ticketKey(), window);
+            result.put(window.ticketKey(), window);
         }
+        return result;
+    }
 
-        Map<String, Ticket> ticketByKey = new HashMap<>();
+    private static Map<String, Ticket> indexTickets(List<Ticket> tickets) {
+        Map<String, Ticket> result = new HashMap<>();
         for (Ticket ticket : tickets) {
-            ticketByKey.put(ticket.key(), ticket);
+            result.put(ticket.key(), ticket);
         }
+        return result;
+    }
 
+    private static FixLinks linkFixCommits(GitClient git, Map<String, Ticket> ticketByKey)
+            throws IOException, InterruptedException {
         List<FixCommit> fixCommits = git.findFixCommits(ticketByKey.keySet());
         Map<String, Set<String>> classesByTicket = new HashMap<>();
         Map<String, Instant> fixResolutionByCommit = new HashMap<>();
         int szzClassCount = 0;
-
         for (FixCommit fix : fixCommits) {
             Ticket ticket = ticketByKey.get(fix.ticketKey());
-            if (ticket == null) {
-                continue;
-            }
-            fixResolutionByCommit.merge(fix.commitHash(), ticket.resolvedAt(),
-                    (left, right) -> left.isBefore(right) ? left : right);
-            try {
-                List<SzzClass> classes = git.runBasicSzz(fix.commitHash());
-                for (SzzClass szzClass : classes) {
-                    classesByTicket.computeIfAbsent(fix.ticketKey(), ignored -> new LinkedHashSet<>())
-                            .add(szzClass.classPath());
-                    szzClassCount++;
-                }
-            } catch (IOException e) {
-                System.err.println("SZZ ignorato per commit " + fix.commitHash() + ": " + e.getMessage());
+            if (ticket != null) {
+                szzClassCount += linkFix(git, fix, ticket, classesByTicket,
+                        fixResolutionByCommit);
             }
         }
+        return new FixLinks(classesByTicket, fixResolutionByCommit,
+                fixCommits.size(), szzClassCount);
+    }
 
+    private static int linkFix(GitClient git, FixCommit fix, Ticket ticket,
+                               Map<String, Set<String>> classesByTicket,
+                               Map<String, Instant> fixResolutionByCommit)
+            throws InterruptedException {
+        fixResolutionByCommit.merge(fix.commitHash(), ticket.resolvedAt(),
+                (left, right) -> left.isBefore(right) ? left : right);
+        try {
+            List<SzzClass> classes = git.runBasicSzz(fix.commitHash());
+            for (SzzClass szzClass : classes) {
+                classesByTicket.computeIfAbsent(fix.ticketKey(), ignored -> new LinkedHashSet<>())
+                        .add(szzClass.classPath());
+            }
+            return classes.size();
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, e, () -> "SZZ ignorato per commit "
+                    + fix.commitHash() + ": " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static Map<String, Boolean> initializeLabels(List<Release> selectedReleases,
+                                                          Map<Integer, List<String>> inventory) {
         Map<String, Boolean> labels = new LinkedHashMap<>();
-        Set<Integer> selectedIds = new HashSet<>();
         for (Release release : selectedReleases) {
-            selectedIds.add(release.index());
             for (String path : inventory.getOrDefault(release.index(), List.of())) {
                 labels.put(key(release.index(), path), false);
             }
         }
+        return labels;
+    }
 
-        for (Map.Entry<String, Set<String>> entry : classesByTicket.entrySet()) {
-            TicketWindow window = windowByTicket.get(entry.getKey());
-            if (window == null) {
-                continue;
+    private static void applyBuggyLabels(Map<String, Boolean> labels,
+                                         Map<String, Set<String>> classesByTicket,
+                                         Map<String, TicketWindow> windowByTicket,
+                                         List<Release> selectedReleases) {
+        Set<Integer> selectedIds = new HashSet<>();
+        for (Release release : selectedReleases) {
+            selectedIds.add(release.index());
+        }
+        classesByTicket.forEach((ticketKey, paths) -> {
+            TicketWindow window = windowByTicket.get(ticketKey);
+            if (window != null) {
+                applyWindow(labels, paths, window, selectedIds);
             }
-            for (int releaseIndex = window.injectedVersion(); releaseIndex < window.fixedVersion(); releaseIndex++) {
-                if (!selectedIds.contains(releaseIndex)) {
-                    continue;
-                }
-                for (String path : entry.getValue()) {
+        });
+    }
+
+    private static void applyWindow(Map<String, Boolean> labels, Set<String> paths,
+                                    TicketWindow window, Set<Integer> selectedIds) {
+        for (int releaseIndex = window.injectedVersion();
+             releaseIndex < window.fixedVersion(); releaseIndex++) {
+            if (selectedIds.contains(releaseIndex)) {
+                for (String path : paths) {
                     labels.computeIfPresent(key(releaseIndex, path), (ignored, value) -> true);
                 }
             }
         }
-
-        return new LabelingResult(labels, fixResolutionByCommit, windows,
-                fixCommits.size(), szzClassCount);
     }
 
     /**
@@ -96,21 +141,36 @@ public final class LabelingService {
      */
     public static List<TicketWindow> resolveWindows(List<Ticket> tickets,
                                                      List<Release> releases) {
+        Map<String, Release> byVersion = indexReleases(releases);
+        List<Candidate> candidates = buildCandidates(tickets, releases, byVersion);
+        double totalProportion = totalProportion(candidates);
+        return buildWindows(candidates, totalProportion);
+    }
+
+    private static Map<String, Release> indexReleases(List<Release> releases) {
         Map<String, Release> byVersion = new HashMap<>();
         for (Release release : releases) {
             byVersion.put(release.version(), release);
         }
+        return byVersion;
+    }
 
+    private static List<Candidate> buildCandidates(List<Ticket> tickets,
+                                                    List<Release> releases,
+                                                    Map<String, Release> byVersion) {
         List<Candidate> candidates = new ArrayList<>();
         for (Ticket ticket : tickets) {
             Integer ov = openingVersion(ticket, releases);
             Integer fv = fixedVersion(ticket, releases, byVersion);
-            if (ov == null || fv == null || fv < 1) {
-                continue;
+            if (ov != null && fv != null && fv >= 1) {
+                candidates.add(new Candidate(ticket, ov, fv,
+                        affectedVersion(ticket, byVersion, ov, fv)));
             }
-            Integer knownIv = affectedVersion(ticket, byVersion, ov, fv);
-            candidates.add(new Candidate(ticket, ov, fv, knownIv));
         }
+        return candidates;
+    }
+
+    private static double totalProportion(List<Candidate> candidates) {
         double proportionSum = 0.0;
         int proportionCount = 0;
         for (Candidate candidate : candidates) {
@@ -127,8 +187,11 @@ public final class LabelingService {
         if (proportionCount == 0) {
             throw new IllegalStateException("Nessun ticket con IV nota disponibile per Proportion Total");
         }
+        return proportionSum / proportionCount;
+    }
 
-        double totalProportion = proportionSum / proportionCount;
+    private static List<TicketWindow> buildWindows(List<Candidate> candidates,
+                                                   double totalProportion) {
         List<TicketWindow> result = new ArrayList<>();
         for (Candidate candidate : candidates) {
             boolean estimated = candidate.knownIv() == null;
@@ -196,5 +259,10 @@ public final class LabelingService {
     }
 
     private record Candidate(Ticket ticket, int ov, int fv, Integer knownIv) {
+    }
+
+    private record FixLinks(Map<String, Set<String>> classesByTicket,
+                            Map<String, Instant> resolutionByCommit,
+                            int linkedCommitCount, int szzClassCount) {
     }
 }

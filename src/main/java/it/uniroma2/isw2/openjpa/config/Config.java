@@ -40,7 +40,7 @@ public record Config(Path repository, String repositoryUrl, String jiraBaseUrl, 
         return new Config(
                 repository,
                 required(properties, "repository.url"),
-                required(properties, "jira.base.url").replaceAll("/+$", ""),
+                stripTrailingSlashes(required(properties, "jira.base.url")),
                 required(properties, "jira.project"),
                 patterns,
                 required(properties, "git.date.fallback.ref"),
@@ -49,6 +49,14 @@ public record Config(Path repository, String repositoryUrl, String jiraBaseUrl, 
                 output,
                 work
         );
+    }
+
+    private static String stripTrailingSlashes(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
     }
 
     private static Set<String> parseCommitHashes(String value) {

@@ -27,15 +27,20 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class Main {
+
+    private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
 
     private Main() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Instant started = Instant.now();
         try {
             Config config = Config.load();
@@ -44,7 +49,7 @@ public final class Main {
                     config.excludedCommits());
             JiraClient jira = new JiraClient(config.jiraBaseUrl(), config.jiraProject());
 
-            System.out.println("Recupero release e ticket Jira di OPENJPA...");
+            LOGGER.info("Recupero release e ticket Jira di OPENJPA...");
             List<RawRelease> jiraReleases = jira.fetchReleasedSemanticVersions();
             List<Ticket> tickets = jira.fetchFixedBugs();
 
@@ -57,59 +62,67 @@ public final class Main {
             Map<Integer, ReleaseData> releaseData = analyzeReleases(selected, config, git);
             Map<Integer, List<String>> inventory = inventoryOf(releaseData);
 
-            System.out.println("Link Jira/Git, SZZ e Proportion Total...");
+            LOGGER.info("Link Jira/Git, SZZ e Proportion Total...");
             LabelingResult labeling = new LabelingService().label(
                     eligible, selected, tickets, inventory, git);
             long buggyLabels = labeling.labels().values().stream().filter(Boolean::booleanValue).count();
             long estimatedWindows = labeling.windows().stream().filter(TicketWindow::estimated).count();
             double totalProportion = labeling.windows().get(0).proportionUsed();
-            System.out.printf("Proportion Total: %.6f; ticket con IV nota: %d; IV stimate: %d%n",
-                    totalProportion, labeling.windows().size() - estimatedWindows, estimatedWindows);
-            System.out.printf("Fix commit collegati: %d; classi SZZ: %d; etichette Buggy: %d%n",
-                    labeling.linkedFixCommits(), labeling.szzClasses(), buggyLabels);
+            LOGGER.info(() -> String.format(Locale.ROOT,
+                    "Proportion Total: %.6f; ticket con IV nota: %d; IV stimate: %d",
+                    totalProportion, labeling.windows().size() - estimatedWindows, estimatedWindows));
+            LOGGER.info(() -> String.format(Locale.ROOT,
+                    "Fix commit collegati: %d; classi SZZ: %d; etichette Buggy: %d",
+                    labeling.linkedFixCommits(), labeling.szzClasses(), buggyLabels));
 
             Map<Integer, Set<String>> releaseCommits = new LinkedHashMap<>();
             for (ReleaseRange range : ranges) {
                 releaseCommits.put(range.current().index(), git.commitsInRange(
                         range.current().commitHash(), range.boundaryCommit()));
             }
-            System.out.printf("Commit amministrativi/meccanici esclusi dalle metriche: %d%n",
-                    git.excludedCommitCount());
+            LOGGER.info(() -> "Commit amministrativi/meccanici esclusi dalle metriche: "
+                    + git.excludedCommitCount());
             Map<String, CommitStats> commitStats = git.commitStats(
                     selected.stream().map(Release::commitHash).toList());
             MetricsService metrics = new MetricsService(git);
             List<DatasetRow> rows = new ArrayList<>();
 
             for (Release release : selected) {
-                System.out.println("Metriche release " + release.version() + "...");
+                LOGGER.info(() -> "Metriche release " + release.version() + "...");
                 ReleaseData data = releaseData.get(release.index());
-                rows.addAll(metrics.computeRelease(release, releaseCommits.get(release.index()),
-                        data.classes(), data.staticMetrics(), data.smells(), commitStats,
-                        labeling.fixResolutionByCommit().keySet(), labeling.labels()));
+                MetricsService.ReleaseMetricsContext context = new MetricsService.ReleaseMetricsContext(
+                        releaseCommits.get(release.index()), commitStats,
+                        labeling.fixResolutionByCommit().keySet(), labeling.labels());
+                rows.addAll(metrics.computeRelease(release, data.classes(), data.staticMetrics(),
+                        data.smells(), context));
             }
 
             new CsvExporter().write(config.outputCsv(), rows);
             long elapsedSeconds = Duration.between(started, Instant.now()).toSeconds();
-            System.out.printf("Dataset scritto: %s (%d righe, %d s)%n",
-                    config.outputCsv(), rows.size(), elapsedSeconds);
+            LOGGER.info(() -> String.format(Locale.ROOT, "Dataset scritto: %s (%d righe, %d s)",
+                    config.outputCsv(), rows.size(), elapsedSeconds));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.SEVERE, e, () -> "Milestone 1 interrotta: " + e.getMessage());
+            throw e;
         } catch (Exception e) {
-            System.err.println("Milestone 1 interrotta: " + e.getMessage());
-            e.printStackTrace(System.err);
-            System.exit(1);
+            LOGGER.log(Level.SEVERE, e, () -> "Milestone 1 interrotta: " + e.getMessage());
+            throw e;
         }
     }
 
     private static void printReleasePlan(int eligibleCount, int selectedCount,
                                          List<ReleaseRange> ranges) {
-        System.out.printf("Release Jira valide con snapshot: %d; selezionate: %d%n",
-                eligibleCount, selectedCount);
+        LOGGER.info(() -> String.format(Locale.ROOT,
+                "Release Jira valide con snapshot: %d; selezionate: %d",
+                eligibleCount, selectedCount));
         for (ReleaseRange range : ranges) {
             Release release = range.current();
             String predecessor = range.predecessor() == null
                     ? "origine" : range.predecessor().version();
-            System.out.printf("  %d  %s  %s  %s  intervallo=%s:%s%n",
+            LOGGER.info(() -> String.format(Locale.ROOT, "  %d  %s  %s  %s  intervallo=%s:%s",
                     release.index(), release.version(), release.releaseDate(), release.snapshotRef(),
-                    range.boundaryType(), predecessor);
+                    range.boundaryType(), predecessor));
         }
     }
 
@@ -142,9 +155,10 @@ public final class Main {
                     .filter(staticMetrics::containsKey)
                     .toList();
             Map<String, Integer> smells = smellCounter.count(worktree, classes);
-            System.out.printf("Inventario %s: %d classi Java di produzione"
-                            + " (%d annotation type esclusi)%n",
-                    release.version(), classes.size(), javaFiles.size() - classes.size());
+            LOGGER.info(() -> String.format(Locale.ROOT,
+                    "Inventario %s: %d classi Java di produzione"
+                            + " (%d annotation type esclusi)",
+                    release.version(), classes.size(), javaFiles.size() - classes.size()));
             return new ReleaseData(classes, staticMetrics, smells);
         } finally {
             git.removeWorktree(worktree);

@@ -17,12 +17,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
 public final class MetricsService {
 
     private static final double SECONDS_PER_WEEK = 7.0 * 24.0 * 60.0 * 60.0;
+    private static final Logger LOGGER = Logger.getLogger(MetricsService.class.getName());
 
     private final GitClient git;
 
@@ -30,14 +33,10 @@ public final class MetricsService {
         this.git = git;
     }
 
-    public List<DatasetRow> computeRelease(Release release,
-                                           Set<String> releaseCommits,
-                                           List<String> classPaths,
+    public List<DatasetRow> computeRelease(Release release, List<String> classPaths,
                                            Map<String, StaticMetrics> staticMetricsByClass,
                                            Map<String, Integer> smells,
-                                           Map<String, CommitStats> commitStats,
-                                           Set<String> fixCommits,
-                                           Map<String, Boolean> labels)
+                                           ReleaseMetricsContext context)
             throws IOException, InterruptedException {
         List<DatasetRow> rows = new ArrayList<>();
         Instant releaseTime = release.releaseDate().atStartOfDay().toInstant(ZoneOffset.UTC);
@@ -51,16 +50,18 @@ public final class MetricsService {
             }
 
             List<Touch> history = git.fileHistory(release.commitHash(), classPath);
-            ProcessMetrics processMetrics = computeProcessMetrics(history, releaseCommits,
-                    commitStats, fixCommits, releaseTime);
-            boolean buggy = labels.getOrDefault(LabelingService.key(release.index(), classPath), false);
+            ProcessMetrics processMetrics = computeProcessMetrics(history, context.releaseCommits(),
+                    context.commitStats(), context.fixCommits(), releaseTime);
+            boolean buggy = context.labels().getOrDefault(
+                    LabelingService.key(release.index(), classPath), false);
             rows.add(new DatasetRow("OPENJPA", release.version(), classPath,
                     staticMetrics, processMetrics, smells.getOrDefault(classPath, 0), buggy));
 
             completed++;
             if (completed % 250 == 0) {
-                System.out.printf("  metriche %s: %d/%d classi%n",
-                        release.version(), completed, classPaths.size());
+                int processed = completed;
+                LOGGER.info(() -> String.format(Locale.ROOT, "  metriche %s: %d/%d classi",
+                        release.version(), processed, classPaths.size()));
             }
         }
         return rows;
@@ -152,5 +153,11 @@ public final class MetricsService {
                 entropyTotal / nr,
                 ownership
         );
+    }
+
+    public record ReleaseMetricsContext(Set<String> releaseCommits,
+                                        Map<String, CommitStats> commitStats,
+                                        Set<String> fixCommits,
+                                        Map<String, Boolean> labels) {
     }
 }

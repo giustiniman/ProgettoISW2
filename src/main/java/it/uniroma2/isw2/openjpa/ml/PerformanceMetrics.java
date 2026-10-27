@@ -73,12 +73,12 @@ record PerformanceMetrics(long truePositive, long falsePositive, long trueNegati
     }
 
     private static double kappa(long tp, long fp, long tn, long fn) {
-        double total = tp + fp + tn + fn;
-        double observed = (tp + tn) / total;
-        double actualPositive = tp + fn;
-        double actualNegative = tn + fp;
-        double predictedPositive = tp + fp;
-        double predictedNegative = tn + fn;
+        double total = (double) tp + fp + tn + fn;
+        double observed = ((double) tp + tn) / total;
+        double actualPositive = (double) tp + fn;
+        double actualNegative = (double) tn + fp;
+        double predictedPositive = (double) tp + fp;
+        double predictedNegative = (double) tn + fn;
         double expected = (actualPositive * predictedPositive
                 + actualNegative * predictedNegative) / (total * total);
         return expected == 1.0 ? 0.0 : (observed - expected) / (1.0 - expected);

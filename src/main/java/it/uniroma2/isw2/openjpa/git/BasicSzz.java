@@ -31,7 +31,7 @@ final class BasicSzz {
             return List.of();
         }
 
-        List<String> diff = git.run("git", "diff", "--unified=0", "--find-renames",
+        List<String> diff = git.run(GitClient.GIT_EXECUTABLE, "diff", "--unified=0", "--find-renames",
                 "--ignore-space-at-eol", "--ignore-blank-lines", parent, fixCommit, "--");
         List<SzzClass> result = new ArrayList<>();
         for (Map.Entry<String, List<LineRange>> entry : parseRemovedRanges(diff).entrySet()) {
@@ -48,7 +48,7 @@ final class BasicSzz {
         Set<String> introducing = new LinkedHashSet<>();
         for (LineRange range : ranges) {
             try {
-                List<String> lines = git.run("git", "blame", "--line-porcelain", "-L",
+                List<String> lines = git.run(GitClient.GIT_EXECUTABLE, "blame", "--line-porcelain", "-L",
                         range.start() + "," + range.end(), parent, "--", path);
                 for (String line : lines) {
                     if (BLAME_HASH.matcher(line).find()) {
@@ -70,20 +70,26 @@ final class BasicSzz {
             if (line.startsWith("--- ")) {
                 oldPath = stripDiffPrefix(line.substring(4).trim());
                 production = oldPath != null && GitClient.isProductionJava(oldPath);
-            } else if (production && line.startsWith("@@")) {
-                Matcher matcher = HUNK.matcher(line);
-                if (matcher.matches()) {
-                    int start = Integer.parseInt(matcher.group("start"));
-                    int count = matcher.group("count") == null
-                            ? 1 : Integer.parseInt(matcher.group("count"));
-                    if (count > 0) {
-                        result.computeIfAbsent(oldPath, ignored -> new ArrayList<>())
-                                .add(new LineRange(start, start + count - 1));
-                    }
-                }
+            } else if (production) {
+                addRemovedRange(line, oldPath, result);
             }
         }
         return result;
+    }
+
+    private static void addRemovedRange(String line, String oldPath,
+                                        Map<String, List<LineRange>> result) {
+        Matcher matcher = HUNK.matcher(line);
+        if (!matcher.matches()) {
+            return;
+        }
+        int start = Integer.parseInt(matcher.group("start"));
+        int count = matcher.group("count") == null
+                ? 1 : Integer.parseInt(matcher.group("count"));
+        if (count > 0) {
+            result.computeIfAbsent(oldPath, ignored -> new ArrayList<>())
+                    .add(new LineRange(start, start + count - 1));
+        }
     }
 
     private static String stripDiffPrefix(String value) {

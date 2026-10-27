@@ -5,7 +5,6 @@ import it.uniroma2.isw2.openjpa.model.Ticket;
 import it.uniroma2.isw2.openjpa.model.TicketWindow;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -56,9 +55,10 @@ class LabelingServiceTest {
     void proportionTotalHasNoColdStartWhenNoKnownIvExists() {
         List<Release> releases = releases(6);
         Ticket missing = ticket("OPENJPA-4", 3, 4, List.of(), List.of("1.0.5"));
+        List<Ticket> tickets = List.of(missing);
 
         assertThrows(IllegalStateException.class,
-                () -> LabelingService.resolveWindows(List.of(missing), releases));
+                () -> LabelingService.resolveWindows(tickets, releases));
     }
 
     private static Ticket ticket(String key, int creationDay, int resolutionDay,

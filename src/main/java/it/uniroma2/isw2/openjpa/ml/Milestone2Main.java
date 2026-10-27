@@ -6,8 +6,13 @@ import it.uniroma2.isw2.openjpa.ml.ModelEvaluator.WalkForwardResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class Milestone2Main {
+
+    private static final Logger LOGGER = Logger.getLogger(Milestone2Main.class.getName());
 
     private Milestone2Main() {
     }
@@ -21,12 +26,14 @@ public final class Milestone2Main {
                     config.featureSelectionCount(), config.randomSeed(),
                     config.randomForestThreads());
 
-            System.out.printf("Milestone 2: %d istanze, %d release, %d configurazioni%n",
-                    dataset.all().numInstances(), dataset.byRelease().size(), experiments.size());
-            System.out.println("Validazione walk-forward...");
+            LOGGER.info(() -> String.format(Locale.ROOT,
+                    "Milestone 2: %d istanze, %d release, %d configurazioni",
+                    dataset.all().numInstances(), dataset.byRelease().size(), experiments.size()));
+            LOGGER.info("Validazione walk-forward...");
             WalkForwardResult walkForward = evaluator.walkForward(dataset, experiments);
 
-            System.out.printf("Validazione %d-times %d-fold...%n", config.repeats(), config.folds());
+            LOGGER.info(() -> String.format(Locale.ROOT, "Validazione %d-times %d-fold...",
+                    config.repeats(), config.folds()));
             List<SummaryResult> crossValidation = evaluator.repeatedCrossValidation(
                     dataset, experiments, config.repeats(), config.folds());
 
@@ -36,12 +43,14 @@ public final class Milestone2Main {
             SummaryResult selected = exporter.writeComparison(config.outputDirectory(),
                     walkForward.summaries(), crossValidation);
 
-            System.out.printf("BClassifier: %s / %s (score 10x10 CV %.6f)%n",
+            LOGGER.info(() -> String.format(Locale.ROOT,
+                    "BClassifier: %s / %s (score 10x10 CV %.6f)",
                     selected.experiment().classifier().label(),
-                    selected.experiment().pipeline().label(), selected.selectionScore());
-            System.out.println("Risultati scritti in: " + config.outputDirectory());
+                    selected.experiment().pipeline().label(), selected.selectionScore()));
+            LOGGER.info(() -> "Risultati scritti in: " + config.outputDirectory());
         } catch (Exception exception) {
-            System.err.println("Milestone 2 interrotta: " + exception.getMessage());
+            LOGGER.log(Level.SEVERE, exception,
+                    () -> "Milestone 2 interrotta: " + exception.getMessage());
             throw exception;
         }
     }
