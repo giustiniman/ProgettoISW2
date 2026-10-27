@@ -5,14 +5,15 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>it.uniroma2.isw2</groupId>
-    <artifactId>openjpa-milestone1</artifactId>
+    <artifactId>openjpa-analysis</artifactId>
     <version>1.0.0</version>
-    <name>OpenJPA Milestone 1</name>
+    <name>OpenJPA ISW2 Analysis</name>
 
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.11.0</junit.version>
+        <exec.mainClass>it.uniroma2.isw2.openjpa.app.Main</exec.mainClass>
     </properties>
 
     <dependencies>
@@ -30,6 +31,11 @@
             <groupId>net.sourceforge.pmd</groupId>
             <artifactId>pmd-java</artifactId>
             <version>7.7.0</version>
+        </dependency>
+        <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>weka-stable</artifactId>
+            <version>3.8.6</version>
         </dependency>
 
         <dependency>
@@ -60,7 +66,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.4.1</version>
                 <configuration>
-                    <mainClass>it.uniroma2.isw2.openjpa.app.Main</mainClass>
+                    <mainClass>${exec.mainClass}</mainClass>
                 </configuration>
             </plugin>
         </plugins>
