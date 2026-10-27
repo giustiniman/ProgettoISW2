@@ -7,7 +7,6 @@ import it.uniroma2.isw2.openjpa.ml.ModelEvaluator.WalkForwardResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class Milestone2Main {
@@ -49,9 +48,7 @@ public final class Milestone2Main {
                     selected.experiment().pipeline().label(), selected.selectionScore()));
             LOGGER.info(() -> "Risultati scritti in: " + config.outputDirectory());
         } catch (Exception exception) {
-            LOGGER.log(Level.SEVERE, exception,
-                    () -> "Milestone 2 interrotta: " + exception.getMessage());
-            throw exception;
+            throw new IllegalStateException("Milestone 2 interrotta", exception);
         }
     }
 

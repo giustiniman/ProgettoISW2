@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class Main {
@@ -103,11 +102,9 @@ public final class Main {
                     config.outputCsv(), rows.size(), elapsedSeconds));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            LOGGER.log(Level.SEVERE, e, () -> "Milestone 1 interrotta: " + e.getMessage());
-            throw e;
+            throw new IllegalStateException("Milestone 1 interrotta", e);
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, e, () -> "Milestone 1 interrotta: " + e.getMessage());
-            throw e;
+            throw new IllegalStateException("Milestone 1 interrotta", e);
         }
     }
 

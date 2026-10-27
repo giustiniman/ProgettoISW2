@@ -39,8 +39,24 @@ public final class CkMetricsCalculator {
             }
         }, inputs);
 
-        Map<String, StaticMetrics> metrics = new java.util.LinkedHashMap<>();
         List<String> missing = new ArrayList<>();
+        Map<String, StaticMetrics> metrics = collectMetrics(
+                root, classPaths, resultsByFile, missing);
+
+        if (!missing.isEmpty() || !errors.isEmpty()) {
+            String detail = errors.isEmpty() ? "nessun risultato CK per " + missing.get(0)
+                    : errors.get(0);
+            throw new IOException("CK non ha analizzato tutte le classi: " + missing.size()
+                    + " mancanti, " + errors.size() + " errori. Primo problema: " + detail);
+        }
+        return Map.copyOf(metrics);
+    }
+
+    private static Map<String, StaticMetrics> collectMetrics(
+            Path root, List<String> classPaths,
+            Map<String, List<CKClassResult>> resultsByFile,
+            List<String> missing) throws IOException {
+        Map<String, StaticMetrics> metrics = new java.util.LinkedHashMap<>();
         for (String classPath : classPaths) {
             List<CKClassResult> candidates = resultsByFile.getOrDefault(classPath, List.of());
             CKClassResult selected = selectTopLevelClass(classPath, candidates);
@@ -57,14 +73,7 @@ public final class CkMetricsCalculator {
                         selected.getCbo(), selected.getRfc(), Math.max(0.0, Math.min(1.0, lcom))));
             }
         }
-
-        if (!missing.isEmpty() || !errors.isEmpty()) {
-            String detail = errors.isEmpty() ? "nessun risultato CK per " + missing.get(0)
-                    : errors.get(0);
-            throw new IOException("CK non ha analizzato tutte le classi: " + missing.size()
-                    + " mancanti, " + errors.size() + " errori. Primo problema: " + detail);
-        }
-        return Map.copyOf(metrics);
+        return metrics;
     }
 
     private static boolean isAnnotationType(Path source) throws IOException {
