@@ -91,7 +91,7 @@ public final class Main {
                 ReleaseData data = releaseData.get(release.index());
                 MetricsService.ReleaseMetricsContext context = new MetricsService.ReleaseMetricsContext(
                         releaseCommits.get(release.index()), commitStats,
-                        labeling.fixResolutionByCommit().keySet(), labeling.labels());
+                        labeling.fixCommits(), labeling.labels());
                 rows.addAll(metrics.computeRelease(release, data.classes(), data.staticMetrics(),
                         data.smells(), context));
             }

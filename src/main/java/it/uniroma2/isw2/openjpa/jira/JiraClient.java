@@ -70,7 +70,7 @@ public final class JiraClient {
 
         while (startAt < total) {
             String url = baseUrl + "/rest/api/2/search?jql=" + encode(jql)
-                    + "&fields=key,created,resolutiondate,versions,fixVersions"
+                    + "&fields=key,created,versions"
                     + "&startAt=" + startAt + "&maxResults=1000";
             JsonNode page = get(url);
             total = page.path("total").asInt(0);
@@ -81,16 +81,13 @@ public final class JiraClient {
             for (JsonNode issue : issues) {
                 JsonNode fields = issue.path("fields");
                 Instant created = parseJiraInstant(fields.path("created").asText(null));
-                Instant resolved = parseJiraInstant(fields.path("resolutiondate").asText(null));
-                if (created == null || resolved == null) {
+                if (created == null) {
                     continue;
                 }
                 result.add(new Ticket(
                         issue.path("key").asText(),
                         created,
-                        resolved,
-                        versionNames(fields.path("versions")),
-                        versionNames(fields.path("fixVersions"))
+                        versionNames(fields.path("versions"))
                 ));
             }
             startAt += issues.size();

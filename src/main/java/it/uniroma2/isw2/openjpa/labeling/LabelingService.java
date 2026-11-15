@@ -31,15 +31,19 @@ public final class LabelingService {
                                 List<Ticket> tickets,
                                 Map<Integer, List<String>> inventory,
                                 GitClient git) throws IOException, InterruptedException {
-        List<TicketWindow> windows = resolveWindows(tickets, allReleases);
+        Set<String> ticketKeys = new HashSet<>();
+        for (Ticket ticket : tickets) {
+            ticketKeys.add(ticket.key());
+        }
+        List<FixCommit> fixCommits = git.findFixCommits(ticketKeys);
+        List<TicketWindow> windows = resolveWindows(tickets, allReleases, fixCommits);
         Map<String, TicketWindow> windowByTicket = indexWindows(windows);
-        Map<String, Ticket> ticketByKey = indexTickets(tickets);
-        FixLinks fixLinks = linkFixCommits(git, ticketByKey);
+        FixLinks fixLinks = linkFixCommits(git, fixCommits);
         Map<String, Boolean> labels = initializeLabels(selectedReleases, inventory);
         applyBuggyLabels(labels, fixLinks.classesByTicket(), windowByTicket,
                 selectedReleases);
 
-        return new LabelingResult(labels, fixLinks.resolutionByCommit(), windows,
+        return new LabelingResult(labels, fixLinks.fixCommits(), windows,
                 fixLinks.linkedCommitCount(), fixLinks.szzClassCount());
     }
 
@@ -51,37 +55,22 @@ public final class LabelingService {
         return result;
     }
 
-    private static Map<String, Ticket> indexTickets(List<Ticket> tickets) {
-        Map<String, Ticket> result = new HashMap<>();
-        for (Ticket ticket : tickets) {
-            result.put(ticket.key(), ticket);
-        }
-        return result;
-    }
-
-    private static FixLinks linkFixCommits(GitClient git, Map<String, Ticket> ticketByKey)
-            throws IOException, InterruptedException {
-        List<FixCommit> fixCommits = git.findFixCommits(ticketByKey.keySet());
+    private static FixLinks linkFixCommits(GitClient git, List<FixCommit> fixCommits)
+            throws InterruptedException {
         Map<String, Set<String>> classesByTicket = new HashMap<>();
-        Map<String, Instant> fixResolutionByCommit = new HashMap<>();
+        Set<String> fixHashes = new HashSet<>();
         int szzClassCount = 0;
         for (FixCommit fix : fixCommits) {
-            Ticket ticket = ticketByKey.get(fix.ticketKey());
-            if (ticket != null) {
-                szzClassCount += linkFix(git, fix, ticket, classesByTicket,
-                        fixResolutionByCommit);
-            }
+            fixHashes.add(fix.commitHash());
+            szzClassCount += linkFix(git, fix, classesByTicket);
         }
-        return new FixLinks(classesByTicket, fixResolutionByCommit,
+        return new FixLinks(classesByTicket, fixHashes,
                 fixCommits.size(), szzClassCount);
     }
 
-    private static int linkFix(GitClient git, FixCommit fix, Ticket ticket,
-                               Map<String, Set<String>> classesByTicket,
-                               Map<String, Instant> fixResolutionByCommit)
+    private static int linkFix(GitClient git, FixCommit fix,
+                               Map<String, Set<String>> classesByTicket)
             throws InterruptedException {
-        fixResolutionByCommit.merge(fix.commitHash(), ticket.resolvedAt(),
-                (left, right) -> left.isBefore(right) ? left : right);
         try {
             List<SzzClass> classes = git.runBasicSzz(fix.commitHash());
             for (SzzClass szzClass : classes) {
@@ -140,11 +129,23 @@ public final class LabelingService {
      * stimare tutti i ticket senza una affected version valida.
      */
     public static List<TicketWindow> resolveWindows(List<Ticket> tickets,
-                                                     List<Release> releases) {
+                                                     List<Release> releases,
+                                                     List<FixCommit> fixCommits) {
         Map<String, Release> byVersion = indexReleases(releases);
-        List<Candidate> candidates = buildCandidates(tickets, releases, byVersion);
+        Map<String, Instant> firstFixByTicket = firstFixByTicket(fixCommits);
+        List<Candidate> candidates = buildCandidates(
+                tickets, releases, byVersion, firstFixByTicket);
         double totalProportion = totalProportion(candidates);
         return buildWindows(candidates, totalProportion);
+    }
+
+    private static Map<String, Instant> firstFixByTicket(List<FixCommit> fixCommits) {
+        Map<String, Instant> result = new HashMap<>();
+        for (FixCommit fixCommit : fixCommits) {
+            result.merge(fixCommit.ticketKey(), fixCommit.commitTime(),
+                    (left, right) -> left.isBefore(right) ? left : right);
+        }
+        return result;
     }
 
     private static Map<String, Release> indexReleases(List<Release> releases) {
@@ -157,11 +158,12 @@ public final class LabelingService {
 
     private static List<Candidate> buildCandidates(List<Ticket> tickets,
                                                     List<Release> releases,
-                                                    Map<String, Release> byVersion) {
+                                                    Map<String, Release> byVersion,
+                                                    Map<String, Instant> firstFixByTicket) {
         List<Candidate> candidates = new ArrayList<>();
         for (Ticket ticket : tickets) {
             Integer ov = openingVersion(ticket, releases);
-            Integer fv = fixedVersion(ticket, releases, byVersion);
+            Integer fv = fixedVersion(ticket.key(), releases, firstFixByTicket);
             if (ov != null && fv != null && fv >= 1) {
                 candidates.add(new Candidate(ticket, ov, fv,
                         affectedVersion(ticket, byVersion, ov, fv)));
@@ -224,20 +226,15 @@ public final class LabelingService {
         return result;
     }
 
-    private static Integer fixedVersion(Ticket ticket, List<Release> releases,
-                                        Map<String, Release> byVersion) {
-        Integer explicit = ticket.fixVersions().stream()
-                .map(byVersion::get)
-                .filter(java.util.Objects::nonNull)
-                .map(Release::index)
-                .min(Integer::compareTo)
-                .orElse(null);
-        if (explicit != null) {
-            return explicit;
+    private static Integer fixedVersion(String ticketKey, List<Release> releases,
+                                        Map<String, Instant> firstFixByTicket) {
+        Instant firstFix = firstFixByTicket.get(ticketKey);
+        if (firstFix == null) {
+            return null;
         }
-        var resolutionDate = ticket.resolvedAt().atZone(ZoneOffset.UTC).toLocalDate();
+        var fixDate = firstFix.atZone(ZoneOffset.UTC).toLocalDate();
         return releases.stream()
-                .filter(release -> !release.releaseDate().isBefore(resolutionDate))
+                .filter(release -> !release.releaseDate().isBefore(fixDate))
                 .map(Release::index)
                 .findFirst()
                 .orElse(null);
@@ -262,7 +259,7 @@ public final class LabelingService {
     }
 
     private record FixLinks(Map<String, Set<String>> classesByTicket,
-                            Map<String, Instant> resolutionByCommit,
+                            Set<String> fixCommits,
                             int linkedCommitCount, int szzClassCount) {
     }
 }
