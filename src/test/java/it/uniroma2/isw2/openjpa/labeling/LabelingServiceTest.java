@@ -60,10 +60,10 @@ class LabelingServiceTest {
         List<Release> releases = releases(6);
         Ticket missing = ticket("OPENJPA-4", 3, List.of());
         List<Ticket> tickets = List.of(missing);
+        List<FixCommit> fixes = List.of(fix("OPENJPA-4", 5));
 
         assertThrows(IllegalStateException.class,
-                () -> LabelingService.resolveWindows(
-                        tickets, releases, List.of(fix("OPENJPA-4", 5))));
+                () -> LabelingService.resolveWindows(tickets, releases, fixes));
     }
 
     @Test
