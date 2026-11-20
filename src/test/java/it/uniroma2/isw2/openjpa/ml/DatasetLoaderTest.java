@@ -51,6 +51,21 @@ class DatasetLoaderTest {
         assertEquals(3, selected.training().numAttributes()); // due feature + target
     }
 
+    @Test
+    void finalModelReusesPreprocessingLearnedOnTraining() throws Exception {
+        Dataset dataset = new DatasetLoader().load(writeDataset());
+
+        TrainedModel model = TrainedModel.train(dataset.all(), "NaiveBayes", "Baseline",
+                2, 42, 1);
+        TrainedModel.Prediction first = model.predict(dataset.all());
+        TrainedModel.Prediction second = model.predict(dataset.all());
+
+        assertEquals(dataset.all().numInstances(), first.size());
+        assertEquals(first.buggy(), second.buggy());
+        assertEquals(first.probabilities(), second.probabilities());
+        assertEquals(3, model.trainingInfo().featureCount());
+    }
+
     private Path writeDataset() throws Exception {
         Path path = tempDirectory.resolve("dataset.csv");
         Files.writeString(path, """

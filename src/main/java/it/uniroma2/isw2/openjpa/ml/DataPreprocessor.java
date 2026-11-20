@@ -23,11 +23,18 @@ final class DataPreprocessor {
 
     PreparedData prepare(Instances rawTraining, Instances rawTest,
                          PipelineVariant variant, int seed) throws Exception {
+        FittedPreprocessor fitted = fit(rawTraining, variant);
+        Instances training = fitted.trainingForClassifier(seed);
+        Instances test = fitted.transform(rawTest);
+        return new PreparedData(training, test, fitted.unbalancedTrainingSize());
+    }
+
+    FittedPreprocessor fit(Instances rawTraining, PipelineVariant variant) throws Exception {
         Instances training = removeIdentifiers(rawTraining);
-        Instances test = removeIdentifiers(rawTest);
+        AttributeSelection selection = null;
 
         if (variant.usesFeatureSelection()) {
-            AttributeSelection selection = new AttributeSelection();
+            selection = new AttributeSelection();
             InfoGainAttributeEval evaluator = new InfoGainAttributeEval();
             Ranker ranker = new Ranker();
             ranker.setNumToSelect(Math.min(featureSelectionCount, training.numAttributes() - 1));
@@ -35,19 +42,12 @@ final class DataPreprocessor {
             selection.setSearch(ranker);
             selection.SelectAttributes(training);
             training = selection.reduceDimensionality(training);
-            test = selection.reduceDimensionality(test);
         }
 
         Standardize standardize = new Standardize();
         standardize.setInputFormat(training);
         training = Filter.useFilter(training, standardize);
-        test = Filter.useFilter(test, standardize);
-
-        int unbalancedTrainingSize = training.numInstances();
-        if (variant.usesBalancing()) {
-            training = balance(training, seed);
-        }
-        return new PreparedData(training, test, unbalancedTrainingSize);
+        return new FittedPreprocessor(training, selection, standardize, variant);
     }
 
     private static Instances removeIdentifiers(Instances source) throws Exception {
@@ -88,5 +88,33 @@ final class DataPreprocessor {
     }
 
     record PreparedData(Instances training, Instances test, int unbalancedTrainingSize) {
+    }
+
+    record FittedPreprocessor(Instances standardizedTraining,
+                              AttributeSelection selection,
+                              Standardize standardize,
+                              PipelineVariant variant) {
+
+        Instances trainingForClassifier(int seed) throws Exception {
+            Instances training = new Instances(standardizedTraining);
+            return variant.usesBalancing() ? balance(training, seed) : training;
+        }
+
+        Instances transform(Instances rawData) throws Exception {
+            Instances transformed = removeIdentifiers(rawData);
+            if (selection != null) {
+                transformed = selection.reduceDimensionality(transformed);
+            }
+            Standardize fittedCopy = (Standardize) Filter.makeCopy(standardize);
+            return Filter.useFilter(transformed, fittedCopy);
+        }
+
+        int unbalancedTrainingSize() {
+            return standardizedTraining.numInstances();
+        }
+
+        int featureCount() {
+            return standardizedTraining.numAttributes() - 1;
+        }
     }
 }

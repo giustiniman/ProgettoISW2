@@ -1,0 +1,2 @@
+Classifier,Pipeline,CvPrecision,CvRecall,CvF1,CvAUC,CvKappa,CvNPofB20,SelectionScore,TrainingInstances,TrainingAfterBalancing,FeatureCount
+RandomForest,Balancing,0.654860,0.735128,0.692662,0.944254,0.641988,0.619551,0.735264,11657,20194,23

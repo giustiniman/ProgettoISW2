@@ -13,12 +13,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-final class DatasetLoader {
+public final class DatasetLoader {
 
     private static final List<String> REQUIRED = List.of(
             "Project", "Release", "Class", "LOC", "NSmells", "Buggy");
 
     Dataset load(Path path) throws IOException {
+        Instances instances = loadInstances(path);
+        return new Dataset(instances, splitByRelease(instances));
+    }
+
+    public Instances loadInstances(Path path) throws IOException {
         if (!Files.isRegularFile(path)) {
             throw new IOException("Dataset Milestone 1 non trovato: " + path);
         }
@@ -40,7 +45,7 @@ final class DatasetLoader {
         if (!instances.attribute("LOC").isNumeric()) {
             throw new IOException("LOC deve essere una colonna numerica");
         }
-        return new Dataset(instances, splitByRelease(instances));
+        return instances;
     }
 
     private static LinkedHashMap<String, Instances> splitByRelease(Instances data) throws IOException {

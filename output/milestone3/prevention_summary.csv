@@ -1,0 +1,7 @@
+Metric,Value,Definition
+PreventedTotal,218,ActualBuggy(B+) - EstimatedBuggy(B)
+PreventedProportion,0.139744,PreventedTotal / ActualBuggy(A)
+PreventedAmongSmellyBuggy,0.153738,PreventedTotal / ActualBuggy(B+)
+PairedPredictedPrevented,420,Predicted Yes on B+ and No on B
+PairedPredictedWorsened,7,Predicted No on B+ and Yes on B
+NetEstimatedReduction,413,EstimatedBuggy(B+) - EstimatedBuggy(B)
